@@ -120,7 +120,7 @@ static const DlLinkMap* get_lmap_for_handle(void* const handle) {
 #if defined(__linux__)
     DlLinkMap* lmap = nullptr;
     const auto dlinfo_res = ::dlinfo(handle, RTLD_DI_LINKMAP, &lmap);
-    assert(dlinfo_res != 0);
+    assert(dlinfo_res == 0);
     return lmap;
 #elif defined(__QNX__)
     // Special case; for the current process, the handle points to the objlist
