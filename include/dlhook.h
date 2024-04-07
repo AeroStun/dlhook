@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 AeroStun
+ * Copyright 2023-2024 AeroStun
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@
 #ifndef DLHOOK_HXX
 #define DLHOOK_HXX
 
-#include <string_view>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Hook by symbol
 
@@ -28,14 +30,14 @@
 /// @param hook replacement entry for @a symbol.
 /// @return the original address found in the PLT
 /// @note if an error occurs, the program will be aborted
-void* dlhook_sym(void* handle, std::string_view symbol, void* hook);
+void* dlhook_sym(void* handle, const char* symbol, void* hook);
 
 /// Hooks the PLT entries of @a symbol with @a hook in all currently loaded objects.
 ///
 /// @param symbol which symbol to hook in the PLT of @a handle.
 /// @param hook replacement entry for @a symbol.
 /// @note if an error occurs, it will be safely ignored.
-void dlhook_sym_all(std::string_view symbol, void* hook);
+void dlhook_sym_all(const char* symbol, void* hook);
 
 // Hook by address
 
@@ -54,5 +56,9 @@ void dlhook_addr(void* handle, void* original, void* hook);
 /// @param hook replacement address.
 /// @note if an error occurs, the program will be aborted.
 void dlhook_addr_all(void* original, void* hook);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

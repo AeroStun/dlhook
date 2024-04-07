@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 AeroStun
+ * Copyright 2023-2024 AeroStun
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <map>
-#include <string>
 
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #    define _GNU_SOURCE
@@ -38,7 +38,7 @@
 
 #include <unistd.h>
 
-#include "dlhook.hxx"
+#include "dlhook.h"
 
 #if !defined(R_X86_64_JUMP_SLOT) && defined(R_X86_64_JMP_SLOT)
 #    define R_X86_64_JUMP_SLOT R_X86_64_JMP_SLOT
@@ -68,7 +68,7 @@ struct MaybeAddr {
 using DlLinkMap = struct link_map;
 
 struct ObjectPltData {
-    void* plt_addr_base{nullptr};
+    std::uintptr_t plt_addr_base{0U};
 
     const Elf64_Sym* dynsym{nullptr};
 
@@ -138,7 +138,7 @@ static const DlLinkMap* get_lmap_for_handle(void* const handle) {
 }
 
 template <class T>
-void force_write(T& dst, const T value) {
+static void force_write(T& dst, const T value) {
 #if defined(__linux__)
     // Set new target using FOLL_FORCE
     const int proc_self_mem = get_state().proc_self_mem;
@@ -170,7 +170,7 @@ void force_write(T& dst, const T value) {
 static ObjectPltData inspect_object(DlLinkMap const* obj_lmap) {
     ObjectPltData ret{};
 
-    ret.plt_addr_base = reinterpret_cast<void*>(obj_lmap->l_addr);
+    ret.plt_addr_base = reinterpret_cast<std::uintptr_t>(obj_lmap->l_addr);
 
     // Locate symbol table
     const Elf64_Dyn* dyn_symtab = find_dyn_by_tag(obj_lmap->l_ld, DT_SYMTAB);
@@ -242,7 +242,7 @@ static ObjectPltData inspect_object(DlLinkMap const* obj_lmap) {
 
 template <class Callback>
 static void foreach_plt_or_got(const ObjectPltData& obj, Callback&& callback) {
-    auto filter_relas = [&](const auto& rela, const Elf64_Xword reloc_type) -> bool {
+    auto const filter_relas = [&](const auto& rela, const Elf64_Xword reloc_type) -> bool {
         if (ELF64_R_TYPE(rela.r_info) == reloc_type) {
             // Sanity check of the symbol name's index
             const std::size_t idx = obj.dynsym[ELF64_R_SYM(rela.r_info)].st_name;
@@ -250,7 +250,7 @@ static void foreach_plt_or_got(const ObjectPltData& obj, Callback&& callback) {
                 return false;
             }
 
-            return callback(obj.dynstr + idx, *static_cast<void**>(obj.plt_addr_base + rela.r_offset));
+            return callback(obj.dynstr + idx, *reinterpret_cast<void**>(obj.plt_addr_base + rela.r_offset));
         }
 
         return true;
@@ -275,7 +275,7 @@ static ObjectPltData get_object(const DlLinkMap* lmap) {
     ObjectPltData object{};
     if (it == obj_cache.end()) {
         object = inspect_object(lmap);
-        if (object.plt_addr_base == nullptr) {
+        if (object.plt_addr_base == 0U) {
             return {};
         }
         obj_cache.emplace(lmap, object);
@@ -286,20 +286,21 @@ static ObjectPltData get_object(const DlLinkMap* lmap) {
     return object;
 }
 
-static MaybeAddr dlhook_sym(const DlLinkMap* lmap, const std::string_view symbol, void* const hook) {
+static MaybeAddr dlhook_sym(const DlLinkMap* lmap, const char* const symbol, void* const hook) {
     if (lmap == nullptr) {
         return {};
     }
 
+    auto const symbol_length = std::strlen(symbol);
+
     MaybeAddr result{};
-    const auto callback = [symbol, hook, &result](std::string_view name, void*& ptr) -> bool {
+    const auto callback = [symbol, symbol_length, hook, &result](const char* const name, void*& ptr) -> bool {
         // if (!name.starts_with(symbol))
-        if (name.substr(0, symbol.size()) != symbol) {
+        if (std::strncmp(name, symbol, symbol_length) != 0) {
             // Keep going
             return true;
         }
-        name.remove_prefix(symbol.size());
-        if (!name.empty() && name.front() != '@') {
+        if (name[symbol_length] != '\0' && name[symbol_length] != '@') {
             // Keep going
             return true;
         }
@@ -318,13 +319,13 @@ static MaybeAddr dlhook_sym(const DlLinkMap* lmap, const std::string_view symbol
     return result;
 }
 
-void* dlhook_sym(void* const handle, const std::string_view symbol, void* const hook) {
+extern "C" void* dlhook_sym(void* const handle, const char* const symbol, void* const hook) {
     const auto result = dlhook_sym(get_lmap_for_handle(handle), symbol, hook);
     assert(result.valid);
     return result.addr;
 }
 
-void dlhook_sym_all(const std::string_view symbol, void* hook) {
+extern "C" void dlhook_sym_all(const char* symbol, void* hook) {
     for (auto it = _r_debug.r_map; it != nullptr; it = it->l_next) {
         const auto result = dlhook_sym(it, symbol, hook);
         if (!result.valid) {
@@ -338,7 +339,7 @@ static void dlhook_addr(const DlLinkMap* lmap, void* original, void* hook) {
         return;
     }
 
-    const auto callback = [original, hook](std::string_view, void*& ptr) -> bool {
+    const auto callback = [original, hook](const char*, void*& ptr) -> bool {
         if (ptr != original) {
             // Keep going
             return true;
@@ -352,9 +353,11 @@ static void dlhook_addr(const DlLinkMap* lmap, void* original, void* hook) {
     foreach_plt_or_got(get_object(lmap), callback);
 }
 
-void dlhook_addr(void* handle, void* original, void* hook) { dlhook_addr(get_lmap_for_handle(handle), original, hook); }
+extern "C" void dlhook_addr(void* handle, void* original, void* hook) {
+    dlhook_addr(get_lmap_for_handle(handle), original, hook);
+}
 
-void dlhook_addr_all(void* original, void* hook) {
+extern "C" void dlhook_addr_all(void* original, void* hook) {
     for (auto it = _r_debug.r_map; it != nullptr; it = it->l_next) {
         dlhook_addr(it, original, hook);
     }
