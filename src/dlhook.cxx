@@ -275,7 +275,7 @@ static ObjectPltData get_object(const DlLinkMap* lmap) {
     ObjectPltData object{};
     if (it == obj_cache.end()) {
         object = inspect_object(lmap);
-        if (object.plt_addr_base == 0U) {
+        if (object.dynsym == nullptr) {
             return {};
         }
         obj_cache.emplace(lmap, object);
