@@ -24,11 +24,11 @@
 #endif
 
 #if defined(__linux__)
-#    include <dlfcn.h>
 #    include <elf.h>
 #    include <fcntl.h>
 #    include <link.h>
 #elif defined(__QNX__)
+#    include <vector>
 #    include <sys/elf.h>
 #    include <sys/link.h>
 #    include <sys/mman.h>
@@ -36,6 +36,7 @@
 #    error "Unsupported platform"
 #endif
 
+#include <dlfcn.h>
 #include <unistd.h>
 
 #include "dlhook.h"
